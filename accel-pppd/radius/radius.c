@@ -24,7 +24,6 @@
 
 #include "memdebug.h"
 #include "radius.h"
-#include "logger.h"
 
 int conf_max_try = 3;
 int conf_timeout = 3;
