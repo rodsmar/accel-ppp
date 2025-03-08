@@ -106,3 +106,5 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DI
 set(SRC
     src/radius_custom.c
 )
+
+add_executable(accel-ppp ${SRC})
