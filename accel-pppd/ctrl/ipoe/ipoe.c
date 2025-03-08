@@ -282,7 +282,13 @@ static struct ipoe_session *ipoe_session_lookup(struct ipoe_serv *serv, struct d
 		link_selection = NULL;
 	}
 
+	// Primeiro, procure por uma correspondência exata com base no MAC e (opcionalmente) opções de relay agent
 	list_for_each_entry(ses, &serv->sessions, entry) {
+		// Verificar o MAC primeiro
+		if (memcmp(pack->hdr->chaddr, ses->hwaddr, ETH_ALEN) != 0)
+			continue;
+			
+		// Verificar option 82 se estiver presente
 		opt82_match = serv->opt_check_mac_change && pack->relay_agent != NULL;
 
 		if (agent_circuit_id && !ses->agent_circuit_id)
@@ -327,84 +333,57 @@ static struct ipoe_session *ipoe_session_lookup(struct ipoe_serv *serv, struct d
 				opt82_match = 0;
 		}
 
-		if (opt82_match && opt82_ses)
-			*opt82_ses = ses;
-
-		if (memcmp(pack->hdr->chaddr, ses->hwaddr, ETH_ALEN))
-			continue;
-
-		res = ses;
-		break;
-
-		/*if (pack->client_id && !ses->client_id)
-			continue;
-
-		if (!pack->client_id && ses->client_id)
-			continue;
-
-		if (pack->client_id) {
-			if (pack->client_id->len != ses->client_id->len)
-				continue;
-			if (memcmp(pack->client_id->data, ses->client_id->data, pack->client_id->len))
-				continue;
+		// Se tanto o MAC quanto a option 82 correspondem, ou se apenas o MAC corresponde e não estamos verificando option 82
+		if (!serv->opt_check_mac_change || opt82_match) {
+			if (opt82_match && opt82_ses)
+				*opt82_ses = ses;
+			
+			res = ses;
+			break;
 		}
-
-		ses1 = ses;
-
-		if (pack->hdr->xid != ses->xid)
-			continue;
-
-		return ses;*/
 	}
 
-	if (!res || !pack->relay_agent || !opt82_ses || *opt82_ses)
-		return res;
-
-	list_for_each_entry(ses, &serv->sessions, entry) {
-		if (agent_circuit_id && !ses->agent_circuit_id)
-			continue;
-
-		if (opt82_match && agent_remote_id && !ses->agent_remote_id)
-			continue;
-
-		if (opt82_match && link_selection && !ses->link_selection)
-			continue;
-
-		if (opt82_match && !agent_circuit_id && ses->agent_circuit_id)
-			continue;
-
-		if (opt82_match && !agent_remote_id && ses->agent_remote_id)
-			continue;
-
-		if (opt82_match && !link_selection && ses->link_selection)
-			continue;
-
-		if (opt82_match && agent_circuit_id) {
-			if (*agent_circuit_id != *ses->agent_circuit_id)
+	// Se não encontramos correspondência por MAC, verificamos apenas a option 82
+	if (!res && pack->relay_agent && opt82_ses) {
+		list_for_each_entry(ses, &serv->sessions, entry) {
+			if (!ses->agent_circuit_id && !ses->agent_remote_id)
 				continue;
 
-			if (memcmp(agent_circuit_id + 1, ses->agent_circuit_id + 1, *agent_circuit_id))
-				continue;
+			opt82_match = 1;
+
+			if (agent_circuit_id && !ses->agent_circuit_id)
+				opt82_match = 0;
+
+			if (opt82_match && agent_remote_id && !ses->agent_remote_id)
+				opt82_match = 0;
+
+			if (opt82_match && !agent_circuit_id && ses->agent_circuit_id)
+				opt82_match = 0;
+
+			if (opt82_match && !agent_remote_id && ses->agent_remote_id)
+				opt82_match = 0;
+
+			if (opt82_match && agent_circuit_id) {
+				if (*agent_circuit_id != *ses->agent_circuit_id)
+					opt82_match = 0;
+
+				if (memcmp(agent_circuit_id + 1, ses->agent_circuit_id + 1, *agent_circuit_id))
+					opt82_match = 0;
+			}
+
+			if (opt82_match && agent_remote_id) {
+				if (*agent_remote_id != *ses->agent_remote_id)
+					opt82_match = 0;
+
+				if (memcmp(agent_remote_id + 1, ses->agent_remote_id + 1, *agent_remote_id))
+					opt82_match = 0;
+			}
+
+			if (opt82_match) {
+				*opt82_ses = ses;
+				break;
+			}
 		}
-
-		if (opt82_match && agent_remote_id) {
-			if (*agent_remote_id != *ses->agent_remote_id)
-				continue;
-
-			if (memcmp(agent_remote_id + 1, ses->agent_remote_id + 1, *agent_remote_id))
-				continue;
-		}
-
-		if (opt82_match && link_selection) {
-			if (*link_selection != *ses->link_selection)
-				continue;
-
-			if (memcmp(link_selection + 1, ses->link_selection + 1, *link_selection))
-				continue;
-		}
-
-		*opt82_ses = ses;
-		break;
 	}
 
 	return res;
@@ -654,7 +633,8 @@ static void auth_result(struct ipoe_session *ses, int r)
 {
 	char *username = ses->username;
 
-	ses->username = NULL;
+	// Importante: não limpe o username até que seja confirmado que será destruído
+	// ses->username = NULL;
 
 	if (r == PWDB_DENIED) {
 		if (conf_l4_redirect_on_reject && ses->dhcpv4_request) {
@@ -670,18 +650,23 @@ static void auth_result(struct ipoe_session *ses, int r)
 			triton_timer_add(&ses->ctx, &ses->l4_redirect_timer, 0);
 
 			if (ap_session_set_username(&ses->ses, username)) {
+				ses->username = NULL; // Limpar username apenas se a sessão recebeu uma cópia
+				_free(username);       // e liberar memória
 				ap_session_terminate(&ses->ses, TERM_NAS_REQUEST, 1);
 				return;
 			}
 			log_ppp_info1("%s: authentication failed\n", ses->ses.username);
 			log_ppp_info1("%s: start temporary session (l4-redirect)\n", ses->ses.username);
+			ses->username = NULL; // Limpar username apenas quando sessão recebeu uma cópia
 			goto cont;
 		}
 
 		pthread_rwlock_wrlock(&ses_lock);
-		ses->ses.username = username;
+		ses->ses.username = username;  // Atribua username diretamente
+		ses->username = NULL;          // e limpe o ponteiro original
 		ses->ses.terminate_cause = TERM_AUTH_ERROR;
 		pthread_rwlock_unlock(&ses_lock);
+		
 		if (conf_ppp_verbose)
 			log_ppp_warn("authentication failed\n");
 		if (conf_l4_redirect_on_reject && !ses->dhcpv4_request)
@@ -691,9 +676,14 @@ static void auth_result(struct ipoe_session *ses, int r)
 	}
 
 	if (ap_session_set_username(&ses->ses, username)) {
+		ses->username = NULL; // Limpar username apenas se a sessão recebeu uma cópia
+		_free(username);      // e liberar memória
 		ap_session_terminate(&ses->ses, TERM_NAS_REQUEST, 1);
 		return;
 	}
+	
+	// Username foi copiado para a sessão, então podemos liberá-lo do contexto da sessão
+	ses->username = NULL;
 	log_ppp_info1("%s: authentication succeeded\n", ses->ses.username);
 
 	if (conf_check_exists && check_exists(ses, ses->yiaddr)) {
