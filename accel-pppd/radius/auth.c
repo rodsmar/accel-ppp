@@ -167,6 +167,7 @@ static void rad_auth_recv(struct rad_req_t *req)
 {
 	struct rad_packet_t *pack = req->reply;
 	unsigned int dt;
+	struct rad_attr_t *attr;
 
 	triton_timer_del(&req->timeout);
 
@@ -174,7 +175,9 @@ static void rad_auth_recv(struct rad_req_t *req)
 	stat_accm_add(req->serv->stat_auth_query_1m, dt);
 	stat_accm_add(req->serv->stat_auth_query_5m, dt);
 
+	// Verifica se é um Access-Accept ou um Access-Reject com Mikrotik-Rate-Limit
 	if (pack->code == CODE_ACCESS_ACCEPT) {
+		// Caso normal de Access-Accept - continua processamento
 		if (rad_proc_attrs(req)) {
 			rad_auth_finalize(req->rpd, PWDB_DENIED);
 			return;
@@ -186,7 +189,29 @@ static void rad_auth_recv(struct rad_req_t *req)
 			.reply = pack,
 		};
 		triton_event_fire(EV_RADIUS_ACCESS_ACCEPT, &ev);
-	} else {
+	} 
+	else if (pack->code == CODE_ACCESS_REJECT && rad_packet_find_attr(pack, "Mikrotik", "Mikrotik-Rate-Limit")) {
+		// Access-Reject com Mikrotik-Rate-Limit - converte para Accept
+		log_ppp_info1("radius: converting Access-Reject to Access-Accept due to Mikrotik-Rate-Limit presence\n");
+		
+		// Alteramos o código para Access-Accept para permitir o processamento correto
+		pack->code = CODE_ACCESS_ACCEPT;
+		
+		if (rad_proc_attrs(req)) {
+			rad_auth_finalize(req->rpd, PWDB_DENIED);
+			return;
+		}
+
+		struct ev_radius_t ev = {
+			.ses = req->rpd->ses,
+			.request = req->pack,
+			.reply = pack,
+		};
+		triton_event_fire(EV_RADIUS_ACCESS_ACCEPT, &ev);
+	} 
+	else {
+		// Access-Reject padrão sem Mikrotik-Rate-Limit - rejeita conexão
+		log_ppp_info1("radius: session rejected (Access-Reject without Mikrotik-Rate-Limit)\n");
 		rad_auth_finalize(req->rpd, PWDB_DENIED);
 		return;
 	}

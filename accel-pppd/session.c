@@ -26,6 +26,7 @@
 #include "mempool.h"
 #include "config.h"
 #include "memdebug.h"
+#include "net.h"
 
 #define SID_SOURCE_SEQ 0
 #define SID_SOURCE_URANDOM 1
@@ -69,13 +70,15 @@ static void (*shutdown_cb)(void);
 static void generate_sessionid(struct ap_session *ses);
 static void save_seq(void);
 
+struct net *default_net;
+
 void __export ap_session_init(struct ap_session *ses)
 {
 	memset(ses, 0, sizeof(*ses));
 	INIT_LIST_HEAD(&ses->pd_list);
 	ses->ifindex = -1;
 	ses->unit_idx = -1;
-	ses->net = net;
+	ses->net = default_net;
 }
 
 void __export ap_session_set_ifindex(struct ap_session *ses)
@@ -101,6 +104,9 @@ int __export ap_session_starting(struct ap_session *ses)
 
 	if (ses->ifindex == -1 && ses->ifname[0])
 		ses->ifindex = net->get_ifindex(ses->ifname);
+
+	if (ses->net && ses->ifname)
+		ses->ifindex = ses->net->get_ifindex(ses->ifname);
 
 	if (ses->ifindex != -1)
 		ap_session_set_ifindex(ses);
@@ -422,7 +428,7 @@ static void __terminate_sec(struct ap_session *ses)
 	ap_session_terminate(ses, TERM_NAS_REQUEST, 0);
 }
 
-int __export ap_session_set_username(struct ap_session *s, char *username)
+int __export ap_session_set_username(struct ap_session *s, const char *username)
 {
 	struct ap_session *ses;
 	int wait = 0;
