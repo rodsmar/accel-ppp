@@ -1078,3 +1078,44 @@ static void init(void)
 }
 
 DEFINE_INIT(10, init);
+
+// Modifique a função find_ses para usar nossa nova função de correspondência
+
+// ... existing code ...
+
+static struct ap_session *find_ses(const struct dhcpv6_option *client_id)
+{
+	struct ap_session *ses;
+	struct ipv6db_addr_t *a;
+
+	pthread_rwlock_rdlock(&ses_lock);
+	list_for_each_entry(ses, &ses_list, entry) {
+		if (!ses->ipv6)
+			continue;
+		
+		// Primeiro, verifique pelo client-id se configurado
+		if (conf_client_id) {
+			// Nova função para comparar MAC com client-id
+			if (dhcpv6_match_client_id(ses, client_id)) {
+				pthread_rwlock_unlock(&ses_lock);
+				return ses;
+			}
+			continue;
+		}
+
+		// Correspondência original por IPv6
+		list_for_each_entry(a, &ses->ipv6->addr_list, entry) {
+			if (!a->installed)
+				continue;
+			if (a->prefix_len == 128) {
+				pthread_rwlock_unlock(&ses_lock);
+				return ses;
+			}
+		}
+	}
+	pthread_rwlock_unlock(&ses_lock);
+	
+	return NULL;
+}
+
+// ... existing code ...

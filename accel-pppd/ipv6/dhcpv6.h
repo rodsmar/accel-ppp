@@ -198,4 +198,14 @@ struct dhcpv6_option *dhcpv6_option_alloc(struct dhcpv6_packet *pkt, int code, i
 struct dhcpv6_option *dhcpv6_nested_option_alloc(struct dhcpv6_packet *pkt, struct dhcpv6_option *opt, int code, int len);
 void dhcpv6_fill_relay_info(struct dhcpv6_packet *pkt);
 
+struct dhcpv6_serv_t {
+	struct triton_context_t ctx;
+	int hnd;
+	int fd;
+	int ifindex;
+};
+
+// Nova função para verificar correspondência entre Client-ID e MAC da sessão
+int dhcpv6_match_client_id(struct ap_session *ses, const struct dhcpv6_option *client_id);
+
 #endif
