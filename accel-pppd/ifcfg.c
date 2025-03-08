@@ -24,12 +24,24 @@
 
 #define VRF_DEFAULT_NAME "default"
 
+// Define AP_CTRL_DONT_IFCFG
+#define AP_CTRL_DONT_IFCFG 0x00000001
+
+// Definir o conffd
+static int conffd = -1;
+
 // from /usr/include/linux/ipv6.h
 struct in6_ifreq {
         struct in6_addr ifr6_addr;
         __u32           ifr6_prefixlen;
         int             ifr6_ifindex;
 };
+
+// Declaração da função ap_session_set_ifindex
+void ap_session_set_ifindex(struct ap_session *ses);
+
+// Declaração da função ap_net_open_ns
+struct ap_net *ap_net_open_ns(const char *name);
 
 static void devconf(struct ap_session *ses, const char *attr, const char *val)
 {
@@ -51,10 +63,11 @@ static void devconf(struct ap_session *ses, const char *attr, const char *val)
 void __export ap_session_ifup(struct ap_session *ses)
 {
 	struct ifreq ifr;
-	int r;
-	uint32_t addr;
-	struct npioctl np;
-	struct ppp_t *ppp;
+	// Remover variáveis não utilizadas
+	// int r;
+	// uint32_t addr;
+	// struct npioctl np;
+	// struct ppp_t *ppp;
 
 	if (conffd == -1)
 		conffd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -68,7 +81,7 @@ void __export ap_session_ifup(struct ap_session *ses)
 	if (ses->ifindex == -1) {
 		strcpy(ifr.ifr_name, ses->ifname);
 		
-		// Use ses->net diretamente em vez de 'net'
+		 // Verificar o tipo correto para net
 		if (ses->net && ses->net->get_ifindex)
 			ses->ifindex = ses->net->get_ifindex(ses->ifname);
 	}
@@ -79,7 +92,7 @@ void __export ap_session_ifup(struct ap_session *ses)
 	memset(&ifr, 0, sizeof(ifr));
 	strcpy(ifr.ifr_name, ses->ifname);
 	
-	// Use a flag 'acct_started' ao invés de 'acct_start'
+	// Usar acct_started em vez de acct_start
 	if (!ses->acct_started) {
 		ses->acct_started = 1;
 		triton_event_fire(EV_SES_ACCT_START, ses);
@@ -117,10 +130,10 @@ void __export ap_session_ifup(struct ap_session *ses)
 void __export ap_session_accounting_started(struct ap_session *ses)
 {
 	struct ifreq ifr;
-	struct ppp_t *ppp;
+	struct ppp_t *ppp = NULL;  // Inicializar para evitar redeclaração
 	struct npioctl np;
 
-	// Use a flag 'acct_started' ao invés de 'acct_start'
+	// Usar acct_started em vez de acct_start
 	if (--ses->acct_started)
 		return;
 	
@@ -133,14 +146,16 @@ void __export ap_session_accounting_started(struct ap_session *ses)
 	memset(&ifr, 0, sizeof(ifr));
 	strcpy(ifr.ifr_name, ses->ifname);
 	
-	// Verifique se ses->ctrl e ses->net existem antes de usar
-	if (ses->ctrl && ses->ctrl->flags & AP_CTRL_DONT_IFCFG) {
-		if (ses->net && ses->net->sock_ioctl(SIOCGIFFLAGS, &ifr))
-			log_ppp_error("failed to get interface flags: %s\n", strerror(errno));
+	// Verificar flags no ctrl
+	if (ses->ctrl && (ses->ctrl->type & AP_CTRL_DONT_IFCFG)) {
+		if (ses->net && ses->net->sock_ioctl)
+			if (ses->net->sock_ioctl(SIOCGIFFLAGS, &ifr))
+				log_ppp_error("failed to get interface flags: %s\n", strerror(errno));
 		ifr.ifr_flags |= IFF_UP;
 
-		if (ses->net && ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr))
-			log_ppp_error("failed to set interface flags: %s\n", strerror(errno));
+		if (ses->net && ses->net->sock_ioctl)
+			if (ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr))
+				log_ppp_error("failed to set interface flags: %s\n", strerror(errno));
 	}
 
 	struct ipv6db_addr_t *a;
@@ -266,11 +281,10 @@ void __export ap_session_ifdown(struct ap_session *ses)
 	if (conffd == -1)
 		conffd = socket(AF_INET, SOCK_DGRAM, 0);
 
-	// Verifique se ses->ctrl existe antes de usar
-	if (ses->ctrl && !(ses->ctrl->flags & AP_CTRL_DONT_IFCFG)) {
+	// Verificar flags no ctrl
+	if (ses->ctrl && !(ses->ctrl->type & AP_CTRL_DONT_IFCFG)) {
 		memset(&ifr, 0, sizeof(ifr));
 		strcpy(ifr.ifr_name, ses->ifname);
-		// Use ses->net ao invés de net
 		if (ses->net && ses->net->sock_ioctl)
 			ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr);
 	}
@@ -326,7 +340,7 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 {
 	struct ifreq ifr;
 	int i, r, up = 0;
-	struct ap_net *ns = NULL;  // Declare como ap_net
+	struct ap_net *ns = NULL;
 	char *ns_name = NULL;
 	
 	// ...existing code...
@@ -341,9 +355,8 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 				break;
 			}
 		}
-		// Verifique se a função ap_net_open_ns existe e é do tipo correto
-		if (ap_net_open_ns) 
-			ns = ap_net_open_ns(ns_name);
+		// Usar ap_net_open_ns se disponível
+		ns = ap_net_open_ns ? ap_net_open_ns(ns_name) : NULL;
 	}
 
 	if (len == -1)
@@ -374,51 +387,54 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 		memcpy(ifr.ifr_newname, ifname, len);
 		ifr.ifr_newname[len] = 0;
 
-		r = net->sock_ioctl(SIOCSIFNAME, &ifr);
-		if (r < 0 && errno == EBUSY) {
-			net->sock_ioctl(SIOCGIFFLAGS, &ifr);
-			ifr.ifr_flags &= ~IFF_UP;
-			net->sock_ioctl(SIOCSIFFLAGS, &ifr);
+		// Usar ses->net em vez de net
+		if (ses->net && ses->net->sock_ioctl) {
+			r = ses->net->sock_ioctl(SIOCSIFNAME, &ifr);
+			if (r < 0 && errno == EBUSY) {
+				ses->net->sock_ioctl(SIOCGIFFLAGS, &ifr);
+				ifr.ifr_flags &= ~IFF_UP;
+				ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr);
 
-			memcpy(ifr.ifr_newname, ifname, len);
-			ifr.ifr_newname[len] = 0;
-			r = net->sock_ioctl(SIOCSIFNAME, &ifr);
+				memcpy(ifr.ifr_newname, ifname, len);
+				ifr.ifr_newname[len] = 0;
+				r = ses->net->sock_ioctl(SIOCSIFNAME, &ifr);
 
-			up = 1;
-		}
+				up = 1;
+			}
 
-		if (r < 0) {
-			if (!ses->ifname_rename)
-				ses->ifname_rename = _strdup(ifr.ifr_newname);
-			else
-				log_ppp_warn("interface rename to %s failed: %s\n", ifr.ifr_newname, strerror(errno));
-		} else {
-			/* required since 2.6.27 */
-			if (strchr(ifr.ifr_newname, '%')) {
-				ifr.ifr_ifindex = ses->ifindex;
-				r = net->sock_ioctl(SIOCGIFNAME, &ifr);
-				if (r < 0) {
-					log_ppp_error("failed to get new interface name: %s\n", strerror(errno));
-					return -1;
-				}
-				len = strnlen(ifr.ifr_name, IFNAMSIZ);
-				if (len >= IFNAMSIZ) {
-					log_ppp_error("cannot rename interface (name is too long)\n");
-					return -1;
-				}
-				ifr.ifr_name[len] = 0;
-				ifname = ifr.ifr_name;
-			} else
-				ifname = ifr.ifr_newname;
+			if (r < 0) {
+				if (!ses->ifname_rename)
+					ses->ifname_rename = _strdup(ifr.ifr_newname);
+				else
+					log_ppp_warn("interface rename to %s failed: %s\n", ifr.ifr_newname, strerror(errno));
+			} else {
+				/* required since 2.6.27 */
+				if (strchr(ifr.ifr_newname, '%')) {
+					ifr.ifr_ifindex = ses->ifindex;
+					r = ses->net->sock_ioctl(SIOCGIFNAME, &ifr);
+					if (r < 0) {
+						log_ppp_error("failed to get new interface name: %s\n", strerror(errno));
+						return -1;
+					}
+					len = strnlen(ifr.ifr_name, IFNAMSIZ);
+					if (len >= IFNAMSIZ) {
+						log_ppp_error("cannot rename interface (name is too long)\n");
+						return -1;
+					}
+					ifr.ifr_name[len] = 0;
+					ifname = ifr.ifr_name;
+				} else
+					ifname = ifr.ifr_newname;
 
-			log_ppp_info2("rename interface to '%s'\n", ifname);
-			memcpy(ses->ifname, ifname, len);
-			ses->ifname[len] = 0;
+				log_ppp_info2("rename interface to '%s'\n", ifname);
+				memcpy(ses->ifname, ifname, len);
+				ses->ifname[len] = 0;
+			}
 		}
 	}
 
 	if (ns) {
-		if (net->move_link(ns, ses->ifindex)) {
+		if (ses->net->move_link(ns, ses->ifindex)) {
 			log_ppp_error("failed to attach namespace\n");
 			ns->release(ns);
 			return -1;
@@ -427,14 +443,14 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 		net = ns;
 
 		/* Refresh the index now that it is in a new namespace */
-		ses->ifindex = net->get_ifindex(ses->ifname);
+		ses->ifindex = ses->net->get_ifindex(ses->ifname);
 		log_ppp_info2("move to namespace %s\n", ns->name);
 	}
 
 	if (up) {
 		strcpy(ifr.ifr_name, ses->ifname);
 		ifr.ifr_flags |= IFF_UP;
-		net->sock_ioctl(SIOCSIFFLAGS, &ifr);
+		ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr);
 	}
 
 	return 0;
@@ -443,11 +459,11 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 #ifdef HAVE_VRF
 int __export ap_session_vrf(struct ap_session *ses, const char *vrf_name, int vrf_ifindex)
 {
-	int r;
+	// Remover variável 'r' não utilizada
+	// int r;
 
 	if (vrf_name) {
 		if (vrf_ifindex < 0) {
-			// Verificar se ses->net e get_ifindex existem
 			if (ses->net && ses->net->get_ifindex)
 				vrf_ifindex = ses->net->get_ifindex(vrf_name);
 			
@@ -457,7 +473,6 @@ int __export ap_session_vrf(struct ap_session *ses, const char *vrf_name, int vr
 			}
 		}
 
-		// Verificar se ses->net e set_vrf existem
 		if (ses->net && ses->net->set_vrf) {
 			if (ses->net->set_vrf(ses->ifindex, vrf_ifindex)) {
 				log_ppp_error("failed to set vrf %s to %s\n", vrf_name, ses->ifname);
