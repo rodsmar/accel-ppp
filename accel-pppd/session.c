@@ -99,6 +99,16 @@ void __export ap_session_set_ifindex(struct ap_session *ses)
 
 int __export ap_session_starting(struct ap_session *ses)
 {
+	struct ifreq ifr;
+	struct sockaddr_in addr;
+
+	// Adicionamos a declaração da variável net
+	struct ap_net *net = ses->net;
+
+	pthread_mutex_lock(&ses_lock);
+	list_add_tail(&ses->entry2, &starting_sid_list);
+	pthread_mutex_unlock(&ses_lock);
+
 	if (ap_shutdown)
 		return -1;
 
