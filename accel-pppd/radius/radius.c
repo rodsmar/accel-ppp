@@ -25,6 +25,14 @@
 #include "memdebug.h"
 #include "radius.h"
 
+#define PW_ACCESS_REJECT 3
+#define PW_ACCESS_ACCEPT 2
+#define PW_VENDOR_SPECIFIC 26
+#define VENDOR_MICROTIK 14988
+#define PW_MICROTIK_RATE_LIMIT 8
+
+int radius_get_attr(RADIUS_PACKET *packet, int attr_type, int vendor, int vendor_type);
+
 int conf_max_try = 3;
 int conf_timeout = 3;
 int conf_acct_timeout = 3;
