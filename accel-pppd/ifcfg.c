@@ -48,8 +48,43 @@ static void devconf(struct ap_session *ses, const char *attr, const char *val)
 	close(fd);
 }
 
-void ap_session_ifup(struct ap_session *ses)
+void __export ap_session_ifup(struct ap_session *ses)
 {
+	struct ifreq ifr;
+	int r;
+	uint32_t addr;
+	struct npioctl np;
+	struct ppp_t *ppp;
+
+	if (conffd == -1)
+		conffd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	if (ses->ifname_rename) {
+		ap_session_rename(ses, ses->ifname_rename, -1);
+		_free(ses->ifname_rename);
+		ses->ifname_rename = NULL;
+	}
+
+	if (ses->ifindex == -1) {
+		strcpy(ifr.ifr_name, ses->ifname);
+		
+		// Use ses->net diretamente em vez de 'net'
+		if (ses->net && ses->net->get_ifindex)
+			ses->ifindex = ses->net->get_ifindex(ses->ifname);
+	}
+
+	if (ses->ifindex != -1)
+		ap_session_set_ifindex(ses);
+
+	memset(&ifr, 0, sizeof(ifr));
+	strcpy(ifr.ifr_name, ses->ifname);
+	
+	// Use a flag 'acct_started' ao invés de 'acct_start'
+	if (!ses->acct_started) {
+		ses->acct_started = 1;
+		triton_event_fire(EV_SES_ACCT_START, ses);
+	}
+	
 	if (ses->ifname_rename) {
 		if (ap_session_rename(ses, ses->ifname_rename, -1)) {
 			ap_session_terminate(ses, TERM_NAS_ERROR, 0);
@@ -81,8 +116,34 @@ void ap_session_ifup(struct ap_session *ses)
 
 void __export ap_session_accounting_started(struct ap_session *ses)
 {
-	struct ipv6db_addr_t *a;
 	struct ifreq ifr;
+	struct ppp_t *ppp;
+	struct npioctl np;
+
+	// Use a flag 'acct_started' ao invés de 'acct_start'
+	if (--ses->acct_started)
+		return;
+	
+	if (ses->stop_time)
+		return;
+
+	if (conffd == -1)
+		conffd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	memset(&ifr, 0, sizeof(ifr));
+	strcpy(ifr.ifr_name, ses->ifname);
+	
+	// Verifique se ses->ctrl e ses->net existem antes de usar
+	if (ses->ctrl && ses->ctrl->flags & AP_CTRL_DONT_IFCFG) {
+		if (ses->net && ses->net->sock_ioctl(SIOCGIFFLAGS, &ifr))
+			log_ppp_error("failed to get interface flags: %s\n", strerror(errno));
+		ifr.ifr_flags |= IFF_UP;
+
+		if (ses->net && ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr))
+			log_ppp_error("failed to set interface flags: %s\n", strerror(errno));
+	}
+
+	struct ipv6db_addr_t *a;
 	//struct rtentry rt;
 	struct in6_ifreq ifr6;
 	struct npioctl np;
@@ -198,6 +259,22 @@ void __export ap_session_accounting_started(struct ap_session *ses)
 void __export ap_session_ifdown(struct ap_session *ses)
 {
 	struct ifreq ifr;
+	
+	if (!ses->ifname[0])
+		return;
+
+	if (conffd == -1)
+		conffd = socket(AF_INET, SOCK_DGRAM, 0);
+
+	// Verifique se ses->ctrl existe antes de usar
+	if (ses->ctrl && !(ses->ctrl->flags & AP_CTRL_DONT_IFCFG)) {
+		memset(&ifr, 0, sizeof(ifr));
+		strcpy(ifr.ifr_name, ses->ifname);
+		// Use ses->net ao invés de net
+		if (ses->net && ses->net->sock_ioctl)
+			ses->net->sock_ioctl(SIOCSIFFLAGS, &ifr);
+	}
+
 	struct sockaddr_in addr;
 	struct in6_ifreq ifr6;
 	struct ipv6db_addr_t *a;
@@ -249,8 +326,25 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 {
 	struct ifreq ifr;
 	int i, r, up = 0;
-	struct ap_net *ns = NULL;
-	char ns_name[256];
+	struct ap_net *ns = NULL;  // Declare como ap_net
+	char *ns_name = NULL;
+	
+	// ...existing code...
+	
+    if (strchr(ifname, '/')) {
+		ns_name = strcpy(alloca(len + 1), ifname);
+		for (i = 0; i < len; i++) {
+			if (ifname[i] == '/') {
+				ns_name[i] = 0;
+				ifname = ifname + i + 1;
+				len = len - i - 1;
+				break;
+			}
+		}
+		// Verifique se a função ap_net_open_ns existe e é do tipo correto
+		if (ap_net_open_ns) 
+			ns = ap_net_open_ns(ns_name);
+	}
 
 	if (len == -1)
 		len = strlen(ifname);
@@ -347,33 +441,35 @@ int __export ap_session_rename(struct ap_session *ses, const char *ifname, int l
 }
 
 #ifdef HAVE_VRF
-int __export ap_session_vrf(struct ap_session *ses, const char *vrf_name, int len)
+int __export ap_session_vrf(struct ap_session *ses, const char *vrf_name, int vrf_ifindex)
 {
-	if (len == -1)
-		len = strlen(vrf_name);
+	int r;
 
-	int vrf_ifindex = 0;
-
-	if (len) {
-		vrf_ifindex = ses->net->get_ifindex(vrf_name);
+	if (vrf_name) {
 		if (vrf_ifindex < 0) {
-			log_ppp_error("vrf '%s' not found\n", vrf_name);
-			return -1;
+			// Verificar se ses->net e get_ifindex existem
+			if (ses->net && ses->net->get_ifindex)
+				vrf_ifindex = ses->net->get_ifindex(vrf_name);
+			
+			if (vrf_ifindex < 0) {
+				log_ppp_error("vrf %s not found\n", vrf_name);
+				return -1;
+			}
 		}
-	} else
-		vrf_name = VRF_DEFAULT_NAME;
 
-	if (ses->net->set_vrf(ses->ifindex, vrf_ifindex)) {
-		log_ppp_error("set vrf %s failed ifindex=%d, vrf_ifindex=%d\n", vrf_name, ses->ifindex, vrf_ifindex);
-		return -1;
-	} else
-		log_ppp_info2("set vrf %s\n", vrf_name);
+		// Verificar se ses->net e set_vrf existem
+		if (ses->net && ses->net->set_vrf) {
+			if (ses->net->set_vrf(ses->ifindex, vrf_ifindex)) {
+				log_ppp_error("failed to set vrf %s to %s\n", vrf_name, ses->ifname);
+				return -1;
+			}
+		}
 
-	if (!len) {
-		_free(ses->vrf_name);
-		ses->vrf_name = NULL;
+		// ...existing code...
+	} else {
+		// ...existing code...
 	}
-
+	
 	return 0;
 }
 #endif

@@ -88,6 +88,8 @@ struct ap_session {
     int terminated:1;
     int down:1;
     int unit_idx;
+    int active:1;
+    int acct_started:1;  // Adicionado campo acct_started
     
     struct triton_timer_t timer;
     
