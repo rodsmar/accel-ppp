@@ -11,6 +11,13 @@
 #include "ipdb.h"
 #include "pwdb.h"
 
+// Definindo os atributos para detecção de Reject especial
+#define VENDOR_Mikrotik 14988
+#define Mikrotik_Rate_Limit 8
+#define VENDOR_WISPr 14122
+#define WISPr_Bandwidth_Max_Up 7
+#define WISPr_Bandwidth_Max_Down 8
+
 struct rad_server_t;
 
 struct radius_auth_ctx {

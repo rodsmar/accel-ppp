@@ -167,6 +167,8 @@ static void rad_auth_recv(struct rad_req_t *req)
 {
 	struct rad_packet_t *pack = req->reply;
 	unsigned int dt;
+	struct rad_attr_t *attr;
+	int convert_reject_to_accept = 0;
 
 	triton_timer_del(&req->timeout);
 
@@ -174,7 +176,20 @@ static void rad_auth_recv(struct rad_req_t *req)
 	stat_accm_add(req->serv->stat_auth_query_1m, dt);
 	stat_accm_add(req->serv->stat_auth_query_5m, dt);
 
-	if (pack->code == CODE_ACCESS_ACCEPT) {
+	if (pack->code == CODE_ACCESS_REJECT) {
+		// Verifica se o pacote REJECT contém atributos normalmente presentes em ACCEPTs
+		list_for_each_entry(attr, &pack->attrs, entry) {
+			if ((attr->vendor && attr->vendor->id == VENDOR_Mikrotik && attr->attr->id == Mikrotik_Rate_Limit) ||
+				(attr->vendor && attr->vendor->id == VENDOR_WISPr && attr->attr->id == WISPr_Bandwidth_Max_Up)) {
+				log_ppp_info1("radius: Access-Reject contém atributos de Access-Accept, convertendo para Access-Accept\n");
+				convert_reject_to_accept = 1;
+				pack->code = CODE_ACCESS_ACCEPT;
+				break;
+			}
+		}
+	}
+
+	if (pack->code == CODE_ACCESS_ACCEPT || convert_reject_to_accept) {
 		if (rad_proc_attrs(req)) {
 			rad_auth_finalize(req->rpd, PWDB_DENIED);
 			return;

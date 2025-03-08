@@ -1137,3 +1137,16 @@ static void radius_init(void)
 }
 
 DEFINE_INIT(51, radius_init);
+
+static void ipoe_rad_send_auth_request(struct rad_plugin_t *rad, struct rad_packet_t *pack)
+{
+	struct ipoe_session *ses = container_of(rad, typeof(*ses), radius);
+
+	if (ipoe_rad_send_acct_request(rad, pack))
+		return -1;
+
+	if (ses->yiaddr)
+		rad_packet_add_ipaddr(pack, NULL, "Framed-IP-Address", ses->yiaddr);
+
+	return 0;
+}
