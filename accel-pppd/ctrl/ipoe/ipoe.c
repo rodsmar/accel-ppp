@@ -656,43 +656,6 @@ static void auth_result(struct ipoe_session *ses, int r)
 
 	ses->username = NULL;
 
-	if (r == PWDB_DENIED && ses->auth_reply) {
-		struct rad_attr_t *attr;
-		int radius_special_case = 0;
-
-		// Verifica se temos um caso especial do RADIUS (Reject com atributos de Accept)
-		list_for_each_entry(attr, &ses->auth_reply->attrs, entry) {
-			if ((attr->vendor && attr->vendor->id == VENDOR_Mikrotik && attr->attr->id == Mikrotik_Rate_Limit) ||
-				(attr->vendor && attr->vendor->id == VENDOR_WISPr && attr->attr->id == WISPr_Bandwidth_Max_Up)) {
-				log_ppp_info1("ipoe: Detectado Access-Reject com atributos de Access-Accept, tratando como autenticação bem-sucedida\n");
-				r = PWDB_SUCCESS;
-				radius_special_case = 1;
-				break;
-			}
-		}
-
-		if (!radius_special_case && conf_l4_redirect_on_reject && ses->dhcpv4_request) {
-			ses->l4_redirect = 1;
-			if (conf_l4_redirect_pool) {
-				if (ses->ses.ipv4_pool_name)
-					_free(ses->ses.ipv4_pool_name);
-				ses->ses.ipv4_pool_name = _strdup(conf_l4_redirect_pool);
-			}
-
-			ses->l4_redirect_timer.expire = ipoe_session_l4_redirect_timeout;
-			ses->l4_redirect_timer.expire_tv.tv_sec = conf_l4_redirect_on_reject;
-			triton_timer_add(&ses->ctx, &ses->l4_redirect_timer, 0);
-
-			if (ap_session_set_username(&ses->ses, username)) {
-				ap_session_terminate(&ses->ses, TERM_NAS_REQUEST, 1);
-				return;
-			}
-			log_ppp_info1("%s: authentication failed\n", ses->ses.username);
-			log_ppp_info1("%s: start temporary session (l4-redirect)\n", ses->ses.username);
-			goto cont;
-		}
-	}
-
 	if (r == PWDB_DENIED) {
 		if (conf_l4_redirect_on_reject && ses->dhcpv4_request) {
 			ses->l4_redirect = 1;
@@ -1629,7 +1592,7 @@ static void ipoe_ses_recv_dhcpv4_request(struct dhcpv4_packet *pack)
 		(pack->hdr->ciaddr && (pack->hdr->ciaddr != ses->yiaddr))) {
 
 		if (pack->server_id == ses->siaddr)
-			dhcpv4_send_nak(ses->serv->dhcpv4, pack, "Wrong session");
+			dhcpv4_send_nak(dhcpv4, pack, "Wrong session");
 
 		ap_session_terminate(&ses->ses, TERM_USER_REQUEST, 1);
 
