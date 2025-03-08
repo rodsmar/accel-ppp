@@ -122,7 +122,7 @@ int main(void)
 	return IFLA_VRF_UNSPEC+IFLA_VRF_TABLE;
 }" HAVE_VRF)
 
-set(SRC
+ADD_EXECUTABLE(accel-pppd
 	memdebug.c
 	session.c
 	session_backup.c
@@ -169,14 +169,7 @@ set(SRC
 
 	log.c
 	main.c
-
 )
-
-include_directories(
-	include
-	${CMAKE_CURRENT_SOURCE_DIR}/radius
-)
-
 
 # check if we have getcontext/setcontext
 INCLUDE(CheckFunctionExists)
