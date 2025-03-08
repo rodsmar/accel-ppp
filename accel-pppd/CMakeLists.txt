@@ -122,7 +122,7 @@ int main(void)
 	return IFLA_VRF_UNSPEC+IFLA_VRF_TABLE;
 }" HAVE_VRF)
 
-ADD_EXECUTABLE(accel-pppd
+set(SRC
 	memdebug.c
 	session.c
 	session_backup.c
@@ -169,7 +169,16 @@ ADD_EXECUTABLE(accel-pppd
 
 	log.c
 	main.c
+
+	radius/radius_custom.c
 )
+
+include_directories(
+	include
+	${CMAKE_CURRENT_SOURCE_DIR}/radius
+)
+
+add_executable(accel-pppd ${SRC})
 
 # check if we have getcontext/setcontext
 INCLUDE(CheckFunctionExists)
