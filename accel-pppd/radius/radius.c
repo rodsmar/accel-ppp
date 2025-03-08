@@ -23,6 +23,8 @@
 #include "config.h"
 
 #include "memdebug.h"
+#include "radius.h"
+#include "logger.h"
 
 int conf_max_try = 3;
 int conf_timeout = 3;
@@ -1134,6 +1136,22 @@ static void radius_init(void)
 	triton_event_register_handler(EV_SES_FINISHED, (triton_event_func)ses_finished);
 	triton_event_register_handler(EV_FORCE_INTERIM_UPDATE, (triton_event_func)force_interim_update);
 	triton_event_register_handler(EV_CONFIG_RELOAD, (triton_event_func)load_config);
+}
+
+void handle_radius_response(RADIUS_PACKET *packet) {
+    if (packet->code == PW_ACCESS_REJECT) {
+        // Verifica se o pacote contém o atributo Mikrotik-Rate-Limit
+        if (radius_get_attr(packet, PW_VENDOR_SPECIFIC, VENDOR_MICROTIK, PW_MICROTIK_RATE_LIMIT)) {
+            log_info("Access-Reject with Mikrotik-Rate-Limit detected, treating as Access-Accept");
+            packet->code = PW_ACCESS_ACCEPT;
+        }
+    }
+}
+
+void radius_process_response(RADIUS_PACKET *packet) {
+    // ...existing code...
+    handle_radius_response(packet); // Chama a função customizada para manipular a resposta
+    // ...existing code...
 }
 
 DEFINE_INIT(51, radius_init);
