@@ -1592,7 +1592,7 @@ static void ipoe_ses_recv_dhcpv4_request(struct dhcpv4_packet *pack)
 		(pack->hdr->ciaddr && (pack->hdr->ciaddr != ses->yiaddr))) {
 
 		if (pack->server_id == ses->siaddr)
-			dhcpv4_send_nak(dhcpv4, pack, "Wrong session");
+			dhcpv4_send_nak(ses->serv->dhcpv4, pack, "Wrong session");
 
 		ap_session_terminate(&ses->ses, TERM_USER_REQUEST, 1);
 
