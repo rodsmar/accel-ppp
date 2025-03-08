@@ -170,7 +170,6 @@ set(SRC
 	log.c
 	main.c
 
-	accel-pppd/radius/radius_custom.c
 )
 
 include_directories(
@@ -178,7 +177,6 @@ include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/radius
 )
 
-add_executable(accel-pppd ${SRC})
 
 # check if we have getcontext/setcontext
 INCLUDE(CheckFunctionExists)
