@@ -170,7 +170,7 @@ set(SRC
 	log.c
 	main.c
 
-	radius/radius_custom.c
+	accel-pppd/radius/radius_custom.c
 )
 
 include_directories(
