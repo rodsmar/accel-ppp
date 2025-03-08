@@ -31,7 +31,13 @@
 #define VENDOR_MICROTIK 14988
 #define PW_MICROTIK_RATE_LIMIT 8
 
+typedef struct {
+    int code;
+    // ...other fields...
+} RADIUS_PACKET;
+
 int radius_get_attr(RADIUS_PACKET *packet, int attr_type, int vendor, int vendor_type);
+void log_info(const char *format, ...);
 
 int conf_max_try = 3;
 int conf_timeout = 3;
@@ -1144,11 +1150,6 @@ static void radius_init(void)
 	triton_event_register_handler(EV_FORCE_INTERIM_UPDATE, (triton_event_func)force_interim_update);
 	triton_event_register_handler(EV_CONFIG_RELOAD, (triton_event_func)load_config);
 }
-
-typedef struct {
-    int code;
-    // ...other fields...
-} RADIUS_PACKET;
 
 void handle_radius_response(RADIUS_PACKET *packet) {
     if (packet->code == PW_ACCESS_REJECT) {
