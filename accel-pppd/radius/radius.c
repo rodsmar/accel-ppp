@@ -1137,6 +1137,11 @@ static void radius_init(void)
 	triton_event_register_handler(EV_CONFIG_RELOAD, (triton_event_func)load_config);
 }
 
+typedef struct {
+    int code;
+    // ...other fields...
+} RADIUS_PACKET;
+
 void handle_radius_response(RADIUS_PACKET *packet) {
     if (packet->code == PW_ACCESS_REJECT) {
         // Verifica se o pacote contém o atributo Mikrotik-Rate-Limit
