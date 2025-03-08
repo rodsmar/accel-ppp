@@ -22,6 +22,9 @@
 #include "attr_defs.h"
 #include "config.h"
 
+// Incluir o arquivo de cabeçalho que define a struct ipoe_session
+#include "../ctrl/ipoe/ipoe.h"
+
 #include "memdebug.h"
 
 int conf_max_try = 3;
@@ -1138,7 +1141,9 @@ static void radius_init(void)
 
 DEFINE_INIT(51, radius_init);
 
-static void ipoe_rad_send_auth_request(struct rad_plugin_t *rad, struct rad_packet_t *pack)
+static int ipoe_rad_send_acct_request(struct rad_plugin_t *rad, struct rad_packet_t *pack);
+
+static int ipoe_rad_send_auth_request(struct rad_plugin_t *rad, struct rad_packet_t *pack)
 {
 	struct ipoe_session *ses = container_of(rad, typeof(*ses), radius);
 
