@@ -99,27 +99,13 @@ void __export ap_session_set_ifindex(struct ap_session *ses)
 
 int __export ap_session_starting(struct ap_session *ses)
 {
-	struct ifreq ifr;
-	struct sockaddr_in addr;
-
-	// Adicionamos a declaração da variável net
-	struct ap_net *net = ses->net;
-
-	pthread_mutex_lock(&ses_lock);
-	list_add_tail(&ses->entry2, &starting_sid_list);
-	pthread_mutex_unlock(&ses_lock);
-
 	if (ap_shutdown)
 		return -1;
 
-	if (ses->ifindex == -1 && ses->ifname[0])
-		ses->ifindex = net->get_ifindex(ses->ifname);
-
-	if (ses->net && ses->ifname)
-		ses->ifindex = ses->net->get_ifindex(ses->ifname);
-
-	if (ses->ifindex != -1)
-		ap_session_set_ifindex(ses);
+	if (ses->ifindex == -1 && ses->ifname[0]) {
+		if (ses->net)
+			ses->ifindex = ses->net->get_ifindex(ses->ifname);
+	}
 
 	if (ses->state != AP_STATE_RESTORE) {
 		ses->start_time = _time();
@@ -446,11 +432,18 @@ int __export ap_session_set_username(struct ap_session *s, const char *username)
 	pthread_rwlock_wrlock(&ses_lock);
 	if (conf_single_session >= 0) {
 		list_for_each_entry(ses, &ses_list, entry) {
-			if (ses->username && ses->terminate_cause != TERM_AUTH_ERROR && !(conf_single_session_ignore_case == 1 ? strcasecmp(ses->username, username) : strcmp(ses->username, username))) {
+			if (ses->username && ses->terminate_cause != TERM_AUTH_ERROR && 
+			   !(conf_single_session_ignore_case == 1 ? 
+			     strcasecmp(ses->username, username) : 
+			     strcmp(ses->username, username))) {
 				if (conf_single_session == 0) {
 					pthread_rwlock_unlock(&ses_lock);
 					log_ppp_info1("%s: second session denied\n", username);
-					_free(username);
+					
+					// Para evitar warning do _free com const
+					char *non_const = (char *)username;
+					_free(non_const);
+					
 					return -1;
 				} else {
 					if (!ses->wakeup) {
@@ -464,7 +457,14 @@ int __export ap_session_set_username(struct ap_session *s, const char *username)
 			}
 		}
 	}
-	s->username = username;
+	
+	// Duplicamos a string para não perder o const qualifier
+	s->username = _strdup(username);
+	
+	// Liberamos a string original já que fizemos uma cópia
+	char *non_const = (char *)username;
+	_free(non_const);
+	
 	pthread_rwlock_unlock(&ses_lock);
 
 	if (wait)
